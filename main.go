@@ -10,18 +10,6 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
-const (
-	URI_APID_CRUD = "/api/v1/crud/"
-)
-
-func OpenDB() *sql.DB {
-	db, err := sql.Open("mysql", "/test_db")
-	if err != nil {
-		log.Fatal(err)
-	}
-	return db
-}
-
 func main() {
 	log.Println("started")
 	DB := OpenDB()
@@ -31,59 +19,90 @@ func main() {
 	router := httprouter.New()
 	router.GET("/", rootHandler)
 	router.GET("/favicon.ico", nullHandler)
-	//router.GET("/api/v1/crud/_meta", apid.MetaHandler)
 	router.GET("/api/v1/crud/:table/_meta", apid.TableMetaHandler)
 	router.GET("/api/v1/crud/:table", apid.TableHandler)
 
+	router.NotFound = NotFound
 	router.RedirectTrailingSlash = true
 
 	http.ListenAndServe(":9000", router)
 
 }
 
-func nullHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {}
-
-func rootHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	w.Write([]byte("Root"))
-	log.Print("index handler")
-}
+/********************************
+ *   APID Struct and Handlers   *
+ ********************************/
 
 type Apid struct {
 	Tables map[string]*Table
 }
 
+func nullHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {}
+
+func rootHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	log.Print("index handler")
+	w.Write([]byte("Root. Available paths: /api/v1/crud/_meta, /api/v1/crud/:table, /api/v1/crud/:table/_meta"))
+}
+
+func NotFound(w http.ResponseWriter, r *http.Request) {
+	log.Printf("404 - %s %s", r.Method, r.RequestURI)
+	w.Write([]byte("resource does not exist"))
+}
+
+func NotFoundWithParams(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	log.Printf("404 - %s %s", r.Method, r.RequestURI)
+	w.Write([]byte("resource does not exist"))
+}
+
 func (a *Apid) TableHandler(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	log.Print("tableHandler")
 	if t.ByName("table") == "_meta" {
+		log.Print("loading meta handler")
 		a.MetaHandler(w, r, nil)
 		return
 	}
-	w.Write([]byte("table"))
 
-	log.Printf("params: %v ", t)
 	table := t.ByName("table")
+	w.Write([]byte(fmt.Sprintf("request for table %s ", table)))
+
 	if _, ok := a.Tables[table]; ok {
-		log.Println("Table found! ", table)
+		log.Println("Table found! ")
 	} else {
-		log.Println("No table found ", table)
+		log.Println("No table found ")
+		NotFoundWithParams(w, r, t)
+		return
 	}
-	log.Print("tableHandler")
 }
 
 func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	w.Write([]byte("table meta"))
-	table := t.ByName("table")
-	if _, ok := a.Tables[table]; ok {
-		log.Println("Table found! ", table)
-	} else {
-		log.Println("No table found ", table)
-	}
 	log.Print("TableMetaHandler")
+
+	table := t.ByName("table")
+	w.Write([]byte(fmt.Sprintf("request for table %s meta data ", table)))
+	if _, ok := a.Tables[table]; ok {
+		log.Println("Table found! ")
+	} else {
+		log.Println("No table found ")
+		NotFoundWithParams(w, r, t)
+		return
+	}
 }
 
 func (a *Apid) MetaHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	w.Write([]byte("meta"))
-
 	log.Print("metaHandler")
+	w.Write([]byte("meta for whole schema"))
+}
+
+/********************************************
+ *   DB stuff; connecting, getting tables   *
+ ********************************************/
+
+func OpenDB() *sql.DB {
+	db, err := sql.Open("mysql", "/test_db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	return db
 }
 
 type Table struct {
