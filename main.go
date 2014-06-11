@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/julienschmidt/httprouter"
 )
 
 const (
@@ -28,45 +28,62 @@ func main() {
 	tables := GetTables(DB)
 	apid := &Apid{Tables: tables}
 
-	http.HandleFunc(URI_APID_CRUD, apid.Handler)
-	http.HandleFunc("/", rootHandler)
-	http.HandleFunc("/favicon.ico", nullHandler) // web request from chrome always look for the favicon
+	router := httprouter.New()
+	router.GET("/", rootHandler)
+	router.GET("/favicon.ico", nullHandler)
+	//router.GET("/api/v1/crud/_meta", apid.MetaHandler)
+	router.GET("/api/v1/crud/:table/_meta", apid.TableMetaHandler)
+	router.GET("/api/v1/crud/:table", apid.TableHandler)
 
-	http.ListenAndServe(":9000", nil)
+	router.RedirectTrailingSlash = true
+
+	http.ListenAndServe(":9000", router)
 
 }
 
-func nullHandler(w http.ResponseWriter, r *http.Request) {}
+func nullHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {}
 
-func rootHandler(w http.ResponseWriter, r *http.Request) {
+func rootHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	w.Write([]byte("Root"))
 	log.Print("index handler")
-}
-
-func getTableFromURI(uri string) (string, bool) {
-	tail := uri[len(URI_APID_CRUD):]
-	p := strings.Split(tail, "/")
-	if len(p) > 1 && p[1] == "_meta" {
-		return p[0], true
-	}
-
-	return p[0], false
 }
 
 type Apid struct {
 	Tables map[string]*Table
 }
 
-func (a *Apid) Handler(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("crud"))
-	table, meta := getTableFromURI(r.RequestURI)
-	log.Printf("looking for table %s (meta? %s)", table, meta)
+func (a *Apid) TableHandler(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	if t.ByName("table") == "_meta" {
+		a.MetaHandler(w, r, nil)
+		return
+	}
+	w.Write([]byte("table"))
+
+	log.Printf("params: %v ", t)
+	table := t.ByName("table")
 	if _, ok := a.Tables[table]; ok {
 		log.Println("Table found! ", table)
 	} else {
 		log.Println("No table found ", table)
 	}
-	log.Print("crudHandler")
+	log.Print("tableHandler")
+}
+
+func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	w.Write([]byte("table meta"))
+	table := t.ByName("table")
+	if _, ok := a.Tables[table]; ok {
+		log.Println("Table found! ", table)
+	} else {
+		log.Println("No table found ", table)
+	}
+	log.Print("TableMetaHandler")
+}
+
+func (a *Apid) MetaHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	w.Write([]byte("meta"))
+
+	log.Print("metaHandler")
 }
 
 type Table struct {
