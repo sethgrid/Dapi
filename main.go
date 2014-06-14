@@ -15,13 +15,21 @@ import (
 
 func main() {
 	log.Println("started")
+
+	// currently, we only work on mysql dbs with no user, no password
 	DB := OpenDB()
+
+	// allows us to continue to introspect on our tables
+	// without having to continually ping the database
 	tables := GetTables(DB)
+
+	// container object to expose the db and the tables at endpoints
 	apid := &Apid{DB: DB, Tables: tables}
 
+	// routing
 	router := httprouter.New()
 	router.GET("/", rootHandler)
-	router.GET("/favicon.ico", nullHandler)
+	router.GET("/favicon.ico", nullHandler) // chrome browser handler
 	router.GET("/api/v1/crud/:table/_meta", apid.TableMetaHandler)
 
 	router.GET("/api/v1/crud/:table", apid.GetTable)
@@ -29,17 +37,23 @@ func main() {
 	router.PUT("/api/v1/crud/:table", apid.PutTable)
 	router.DELETE("/api/v1/crud/:table", apid.DeleteTable)
 
+	// use our own NotFound Handler
 	router.NotFound = NotFound
 	router.RedirectTrailingSlash = true
 
+	// could wrap this and use a recover() to prevent
+	// panics from taking down the server
 	http.ListenAndServe(":9000", router)
-
 }
+
+// everything below here needs to be pulled into its own
+// package
 
 /********************************
  *   APID Struct and Handlers   *
  ********************************/
 
+// the apid struct allows us to use the db at different endpoints
 type Apid struct {
 	DB     *sql.DB
 	Tables map[string]*Table
@@ -63,7 +77,7 @@ func NotFoundWithParams(w http.ResponseWriter, r *http.Request, e string) {
 }
 
 // GetTable forwards _meta requests onward. Otherwise, it checks
-// for the existance of the table requested and returns all
+// for the existance of the table requested and returns requested
 // records
 func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	// forward to MetaHandler
@@ -131,12 +145,14 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 		log.Fatal(err)
 	}
 
+	// this should be pulled out into a function
 	log.Printf("200 - %s %s", r.Method, r.RequestURI)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(j))
 
 }
 
+// stub
 func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	log.Print("PostTable")
 
@@ -152,6 +168,7 @@ func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Pa
 	}
 }
 
+// stub
 func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	log.Print("PutTable")
 
@@ -167,6 +184,7 @@ func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 	}
 }
 
+// stub
 func (a *Apid) DeleteTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	log.Print("DeleteTable")
 
@@ -182,6 +200,12 @@ func (a *Apid) DeleteTable(w http.ResponseWriter, r *http.Request, t httprouter.
 	}
 }
 
+/*******************
+ *   Apid helpers  *
+ *******************/
+
+// the meta results allow for endpoint discoverability and represent
+// a table
 type Meta struct {
 	Description string              `json:"description"`
 	SchemaType  string              `json:"type"`
@@ -193,11 +217,13 @@ type Meta struct {
 	Title       string              `json:"title"`
 }
 
+// properties are each column on a table
 type Property struct {
 	Description string `json:"description"`
 	DataType    string `json:"type"`
 }
 
+// displayes the meta data for a single table
 func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	tableName := t.ByName("table")
 	if _, ok := a.Tables[tableName]; !ok {
@@ -215,6 +241,7 @@ func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httpro
 	w.Write(j)
 }
 
+// displays the meta data for the whole database
 func (a *Apid) MetaHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	log.Print("metaHandler")
 	wholeSchema := make([]Meta, 0)
@@ -231,6 +258,7 @@ func (a *Apid) MetaHandler(w http.ResponseWriter, r *http.Request, _ httprouter.
 	w.Write(j)
 }
 
+// common functionality for generating meta data
 func GenMeta(table *Table, location string) Meta {
 	// this could all be initialized at startup, as oppposed to each call
 	properties := make(map[string]Property)
