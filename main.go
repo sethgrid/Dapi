@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,13 +15,17 @@ func main() {
 	log.Println("started")
 	DB := OpenDB()
 	tables := GetTables(DB)
-	apid := &Apid{Tables: tables}
+	apid := &Apid{DB: DB, Tables: tables}
 
 	router := httprouter.New()
 	router.GET("/", rootHandler)
 	router.GET("/favicon.ico", nullHandler)
 	router.GET("/api/v1/crud/:table/_meta", apid.TableMetaHandler)
-	router.GET("/api/v1/crud/:table", apid.TableHandler)
+
+	router.GET("/api/v1/crud/:table", apid.GetTable)
+	router.POST("/api/v1/crud/:table", apid.PostTable)
+	router.PUT("/api/v1/crud/:table", apid.PutTable)
+	router.DELETE("/api/v1/crud/:table", apid.DeleteTable)
 
 	router.NotFound = NotFound
 	router.RedirectTrailingSlash = true
@@ -34,6 +39,7 @@ func main() {
  ********************************/
 
 type Apid struct {
+	DB     *sql.DB
 	Tables map[string]*Table
 }
 
@@ -46,30 +52,123 @@ func rootHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 
 func NotFound(w http.ResponseWriter, r *http.Request) {
 	log.Printf("404 - %s %s", r.Method, r.RequestURI)
-	w.Write([]byte("resource does not exist"))
+	http.Error(w, "resource does not exist", http.StatusNotFound)
 }
 
-func NotFoundWithParams(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+func NotFoundWithParams(w http.ResponseWriter, r *http.Request, e string) {
 	log.Printf("404 - %s %s", r.Method, r.RequestURI)
-	w.Write([]byte("resource does not exist"))
+	http.Error(w, e, http.StatusNotFound)
 }
 
-func (a *Apid) TableHandler(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	log.Print("tableHandler")
+// GetTable forwards _meta requests onward. Otherwise, it checks
+// for the existance of the table requested and returns all
+// records
+func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	// forward to MetaHandler
 	if t.ByName("table") == "_meta" {
 		log.Print("loading meta handler")
 		a.MetaHandler(w, r, nil)
 		return
 	}
 
+	// verify table name validity
+	tableName := t.ByName("table")
+	if _, ok := a.Tables[tableName]; !ok {
+		NotFoundWithParams(w, r, fmt.Sprintf("table (%s) not found", tableName))
+		return
+	}
+
+	// query the table
+	table := a.Tables[tableName]
+	rows, err := a.DB.Query("select * from " + table.Name)
+
+	if err != nil {
+		log.Printf("Error querying GET on %s", table.Name)
+		NotFoundWithParams(w, r, fmt.Sprintf("Table (%s) GET Failed", table))
+	}
+
+	// grab all the column names returned and prepare them
+	// to receive data
+	columnNames, err := rows.Columns()
+	if err != nil {
+		log.Fatalln(err) // or 500, whatever error handling is appropriate
+	}
+	columns := make([]interface{}, len(columnNames))
+	columnPointers := make([]interface{}, len(columnNames))
+	for i := 0; i < len(columnNames); i++ {
+		columnPointers[i] = &columns[i]
+	}
+
+	// to become the json response object
+	resp := make(map[string]interface{})
+	responses := make([]map[string]interface{}, 0)
+
+	// populate json object from rows
+	for rows.Next() {
+		if err := rows.Scan(columnPointers...); err != nil {
+			log.Fatalln(err)
+		}
+
+		for i, data := range columns {
+			// Here we could do some type checking to get
+			// int, bool, etc. Defaulting always to string.
+			resp[columnNames[i]] = string(data.([]byte))
+		}
+		responses = append(responses, resp)
+	}
+
+	j, err := json.Marshal(responses)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("200 - %s %s", r.Method, r.RequestURI)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(j))
+
+}
+
+func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	log.Print("PostTable")
+
 	table := t.ByName("table")
-	w.Write([]byte(fmt.Sprintf("request for table %s ", table)))
+	w.Write([]byte(fmt.Sprintf("POST request for table %s ", table)))
 
 	if _, ok := a.Tables[table]; ok {
 		log.Println("Table found! ")
 	} else {
 		log.Println("No table found ")
-		NotFoundWithParams(w, r, t)
+		NotFoundWithParams(w, r, "")
+		return
+	}
+}
+
+func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	log.Print("PutTable")
+
+	table := t.ByName("table")
+	w.Write([]byte(fmt.Sprintf("PUT request for table %s ", table)))
+
+	if _, ok := a.Tables[table]; ok {
+		log.Println("Table found! ")
+	} else {
+		log.Println("No table found ")
+		NotFoundWithParams(w, r, "")
+		return
+	}
+}
+
+func (a *Apid) DeleteTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	log.Print("DeleteTable")
+
+	table := t.ByName("table")
+	w.Write([]byte(fmt.Sprintf("DELETE request for table %s ", table)))
+
+	if _, ok := a.Tables[table]; ok {
+		log.Println("Table found! ")
+	} else {
+		log.Println("No table found ")
+		NotFoundWithParams(w, r, "")
 		return
 	}
 }
@@ -83,7 +182,7 @@ func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httpro
 		log.Println("Table found! ")
 	} else {
 		log.Println("No table found ")
-		NotFoundWithParams(w, r, t)
+		NotFoundWithParams(w, r, "")
 		return
 	}
 }
