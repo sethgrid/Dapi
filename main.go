@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/julienschmidt/httprouter"
@@ -80,11 +82,14 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 
 	// query the table
 	table := a.Tables[tableName]
-	rows, err := a.DB.Query("select * from " + table.Name)
+	query, args := a.QueryComposer(table.Name, r)
+
+	rows, err := a.DB.Query(query, args...)
 
 	if err != nil {
 		log.Printf("Error querying GET on %s", table.Name)
-		NotFoundWithParams(w, r, fmt.Sprintf("Table (%s) GET Failed", table))
+		NotFoundWithParams(w, r, fmt.Sprintf("GET request failed on %s", table.Name))
+		return
 	}
 
 	// grab all the column names returned and prepare them
@@ -100,11 +105,11 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 	}
 
 	// to become the json response object
-	resp := make(map[string]interface{})
 	responses := make([]map[string]interface{}, 0)
 
 	// populate json object from rows
 	for rows.Next() {
+		resp := make(map[string]interface{})
 		if err := rows.Scan(columnPointers...); err != nil {
 			log.Fatalln(err)
 		}
@@ -112,7 +117,11 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 		for i, data := range columns {
 			// Here we could do some type checking to get
 			// int, bool, etc. Defaulting always to string.
-			resp[columnNames[i]] = string(data.([]byte))
+			if v, ok := data.(int64); ok {
+				resp[columnNames[i]] = v
+			} else if v, ok := data.([]byte); ok {
+				resp[columnNames[i]] = string(v)
+			}
 		}
 		responses = append(responses, resp)
 	}
@@ -190,6 +199,67 @@ func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httpro
 func (a *Apid) MetaHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	log.Print("metaHandler")
 	w.Write([]byte("meta for whole schema"))
+}
+
+// refactor to take interface with methods *.URL.RawQuery
+func (a *Apid) QueryComposer(table string, r *http.Request) (string, []interface{}) {
+	params, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		log.Print("error", err)
+	}
+
+	// init the query
+	q := fmt.Sprintf("select * from %v", table)
+	var where, limit, offset, orderby string
+	args := make([]interface{}, 0)
+
+	// consider creating this at start time
+	cols := make(map[string]bool, 0)
+	for _, c := range a.Tables[table].Cols {
+		cols[c.COLUMN_NAME.String] = true
+	}
+
+	for k, v := range params {
+		switch k {
+		case "limit":
+			// feels wrong. where are parameterized query builders?
+			l, err := strconv.Atoi(v[0])
+			if err != nil {
+				log.Printf("skipping limit ", err)
+			}
+			limit = fmt.Sprintf(" limit %d", l)
+		case "offset":
+			l, err := strconv.Atoi(v[0])
+			if err != nil {
+				log.Printf("skipping offset ", err)
+			}
+			offset = fmt.Sprintf(" offset %d", l)
+		case "orderby":
+		default:
+			// prolly better to use strings.Join()
+			if ok := cols[k]; !ok {
+				log.Print("bad column ", k) // 404 to user?
+				continue
+			}
+			where += " " + k + "=? and"
+			args = append(args, v[0])
+		}
+	}
+
+	// prep `where` and remove trailing 'and'
+	if len(where) > 6 {
+		where = " where " + where[:len(where)-4]
+	}
+
+	// only allow offset if limit is present
+	if len(limit) == 0 && len(offset) > 0 {
+		offset = ""
+		log.Print("Removing offset because limit is missing")
+	}
+
+	q += where + orderby + limit + offset
+	log.Print(q, " ", args)
+	return q, args
 }
 
 /********************************************
