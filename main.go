@@ -3,7 +3,9 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -36,6 +38,11 @@ func main() {
 	router.POST("/api/v1/crud/:table", apid.PostTable)
 	router.PUT("/api/v1/crud/:table", apid.PutTable)
 	router.DELETE("/api/v1/crud/:table", apid.DeleteTable)
+
+	router.GET("/api/v1/transaction", GetTransaction)
+	router.POST("/api/v1/transaction", PostTransaction)
+	router.PUT("/api/v1/transaction", PutTransaction)
+	router.DELETE("/api/v1/transaction", DeleteTransaction)
 
 	// use our own NotFound Handler
 	router.NotFound = NotFound
@@ -96,7 +103,7 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 
 	// query the table
 	table := a.Tables[tableName]
-	query, args := a.QueryComposer(table.Name, r)
+	query, args := a.SelectQueryComposer(table.Name, r)
 
 	rows, err := a.DB.Query(query, args...)
 
@@ -172,16 +179,33 @@ func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Pa
 func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	log.Print("PutTable")
 
-	table := t.ByName("table")
-	w.Write([]byte(fmt.Sprintf("PUT request for table %s ", table)))
+	tableName := t.ByName("table")
 
-	if _, ok := a.Tables[table]; ok {
-		log.Println("Table found! ")
-	} else {
-		log.Println("No table found ")
-		NotFoundWithParams(w, r, "")
+	if _, ok := a.Tables[tableName]; !ok {
+		NotFoundWithParams(w, r, fmt.Sprintf("table (%s) not found", tableName))
 		return
 	}
+	table := a.Tables[tableName]
+
+	pKey := ""
+	for _, c := range table.Cols {
+		if c.COLUMN_KEY.String == "PRI" {
+			pKey = c.COLUMN_NAME.String
+		}
+	}
+	if len(pKey) == 0 {
+		NotFoundWithParams(w, r, fmt.Sprintf("Update table (%s), no primary key on table", tableName))
+		return
+	}
+
+	q, args, err := UpdateQueryComposer(table.Name, pKey, r)
+	if err != nil {
+		NotFoundWithParams(w, r, err.Error())
+		return
+	}
+	log.Printf("Put Query: %s, args: %v", q, args)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(fmt.Sprintf("PUT request for table %s ", table)))
 }
 
 // stub
@@ -302,8 +326,41 @@ func GenMeta(table *Table, location string) Meta {
 	return schema
 }
 
+func UpdateQueryComposer(table, pKey string, r *http.Request) (string, []interface{}, error) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println(string(body))
+
+	v := make(map[string]interface{})
+	err = json.Unmarshal(body, &v)
+	if err != nil {
+		log.Print("error decoding json body to map ", err)
+	}
+	q := fmt.Sprintf("update %v set ", table)
+	set := ""
+	where := ""
+
+	for k, v := range v {
+		// it would be nice to have table.Cols as map rather than slice
+		if k == pKey {
+			where = fmt.Sprintf("where '%v'='%v' limit 1", pKey, v)
+			continue
+		}
+		set += fmt.Sprintf("'%v'='%v',", k, v) // better: strings.Join()
+	}
+
+	if len(where) == 0 {
+		return "", nil, errors.New("Missing primary key in query on " + table)
+	}
+
+	set = set[:len(set)-1] // remove trailing comma
+	return q + set + where, nil, nil
+}
+
 // refactor to take interface with methods *.URL.RawQuery
-func (a *Apid) QueryComposer(table string, r *http.Request) (string, []interface{}) {
+func (a *Apid) SelectQueryComposer(table string, r *http.Request) (string, []interface{}) {
 	params, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
 		log.Print("error", err)
@@ -466,4 +523,35 @@ func GetTables(db *sql.DB) map[string]*Table {
 		}
 	}
 	return allTables
+}
+
+/********************
+ *   Transactions   *
+ ********************/
+
+/*
+how will we manage cross server transactions?
+it seems that we will have to figure out which server has
+the existing transaction, and then forward our request to that box
+transaction id: hostname::uuid
+when we POST|PUT|DELETE, check if we are the hostname, else proxy the request
+we have to consider token experiation (this should clear out the query in
+in mysql and issue errors on further attempts to use the token).
+
+tim's suggestion: use a cookie to store which server has the ongoing transaction
+and let the LB determine where to forward the request. No proxy mess.
+maybe we can do the same with a header?
+*/
+
+func GetTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	w.Write([]byte("unimplemented"))
+}
+func PostTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	w.Write([]byte("unimplemented"))
+}
+func PutTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	w.Write([]byte("unimplemented"))
+}
+func DeleteTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	w.Write([]byte("unimplemented"))
 }
