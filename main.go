@@ -161,18 +161,34 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 
 // stub
 func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	log.Print("PostTable")
+	tableName := t.ByName("table")
 
-	table := t.ByName("table")
-	w.Write([]byte(fmt.Sprintf("POST request for table %s ", table)))
-
-	if _, ok := a.Tables[table]; ok {
-		log.Println("Table found! ")
-	} else {
-		log.Println("No table found ")
-		NotFoundWithParams(w, r, "")
+	if _, ok := a.Tables[tableName]; !ok {
+		NotFoundWithParams(w, r, fmt.Sprintf("table (%s) not found", tableName))
 		return
 	}
+	table := a.Tables[tableName]
+
+	// should we look for the primary key and weed it out?
+	q, args, err := InsertQueryComposer(table.Name, r)
+	if err != nil {
+		NotFoundWithParams(w, r, err.Error())
+		return
+	}
+
+	res, err := a.DB.Exec(q, args...)
+	if err != nil {
+		NotFoundWithParams(w, r, err.Error()+" :: "+q)
+		return
+	}
+	insertId, err := res.LastInsertId()
+	if err != nil {
+		log.Printf("error ", err)
+	}
+	log.Printf("200 - %s %s", r.Method, r.RequestURI)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(fmt.Sprintf("{\"message\":\"success\", \"inserted_id\":%d}", insertId)))
 }
 
 func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
@@ -313,7 +329,7 @@ func GenMeta(table *Table, location string) Meta {
 	required := make([]string, 0)
 	primary := ""
 	schemaType := "object"
-	notes := "TODO: have each method have its own entry because PUT requires the primary key and Delete requires a limit."
+	notes := "TODO: have each method have its own entry because PUT requires the primary key and Delete requires a limit, and POST does not want the primary key."
 	// assume all methods for now. latter, we can have a table restrictions
 	methods := []string{"GET", "POST", "PUT", "DELETE"}
 
@@ -352,6 +368,35 @@ func GenMeta(table *Table, location string) Meta {
 	return schema
 }
 
+// InsertQueryComposer creates a mysql update query
+func InsertQueryComposer(table string, r *http.Request) (string, []interface{}, error) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// the body should be key value pairs, populate them into `v`
+	v := make(map[string]interface{})
+	err = json.Unmarshal(body, &v)
+	if err != nil {
+		log.Print("error decoding json body to map ", err)
+	}
+
+	// set up the query
+	q := fmt.Sprintf("insert into %v set ", table)
+	set := ""
+	args := make([]interface{}, 0)
+
+	for k, v := range v {
+		set += fmt.Sprintf("%v=?,", k) // better: strings.Join()
+		args = append(args, v)
+	}
+
+	set = set[:len(set)-1] // remove trailing comma
+
+	return q + set, args, nil
+}
+
 // DeleteQueryComposer creates a mysql update query
 func DeleteQueryComposer(table string, r *http.Request) (string, []interface{}, error) {
 	body, err := ioutil.ReadAll(r.Body)
@@ -383,7 +428,7 @@ func DeleteQueryComposer(table string, r *http.Request) (string, []interface{}, 
 		args = append(args, v)
 	}
 
-	// if where was not populated, then we were not given the primary key in the query.
+	// if limit was not populated, then err out.
 	if len(limit) == 0 {
 		return "", nil, errors.New("Missing limit key in delete query on " + table)
 	}
