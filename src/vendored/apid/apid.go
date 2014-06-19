@@ -21,6 +21,7 @@ type Apid struct {
 	Tables map[string]*Table
 }
 
+// returns all routing
 func (a *Apid) NewRouter() http.Handler {
 	// routing
 	router := httprouter.New()
@@ -45,18 +46,22 @@ func (a *Apid) NewRouter() http.Handler {
 	return router
 }
 
+// specifically used for handling chrome browser seeking the favicon
 func NullHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {}
 
+// just handles the `/` endpoint
 func RootHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	log.Print("index handler")
 	w.Write([]byte("Root. Available paths: /api/v1/crud/_meta, /api/v1/crud/:table, /api/v1/crud/:table/_meta"))
 }
 
+// standard 404 page
 func NotFound(w http.ResponseWriter, r *http.Request) {
 	log.Printf("404 - %s %s", r.Method, r.RequestURI)
 	http.Error(w, "resource does not exist", http.StatusNotFound)
 }
 
+// 404 page to which we can pass a message string
 func NotFoundWithParams(w http.ResponseWriter, r *http.Request, e string) {
 	log.Printf("404 - %s %s", r.Method, r.RequestURI)
 	http.Error(w, e, http.StatusNotFound)
@@ -131,14 +136,14 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 		log.Fatal(err)
 	}
 
-	// this should be pulled out into a function
+	// this should be pulled out into a function. We should have success and fail handlers.
 	log.Printf("200 - %s %s", r.Method, r.RequestURI)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(j))
 
 }
 
-// stub
+// PostTable inserts a record
 func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	tableName := t.ByName("table")
 
@@ -170,6 +175,7 @@ func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Pa
 	w.Write([]byte(fmt.Sprintf("{\"message\":\"success\", \"inserted_id\":%d}", insertId)))
 }
 
+// PutTable looks for the primary key and errors if missing. Updates records.
 func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	tableName := t.ByName("table")
 
@@ -211,7 +217,7 @@ func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 	w.Write([]byte(fmt.Sprintf("{\"message\":\"success\", \"rows_affected\":%d}", rowsAffected)))
 }
 
-// stub
+// Delete table looks for a limit key. Deletes records.
 func (a *Apid) DeleteTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	tableName := t.ByName("table")
 
