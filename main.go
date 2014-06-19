@@ -175,10 +175,7 @@ func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Pa
 	}
 }
 
-// stub
 func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	log.Print("PutTable")
-
 	tableName := t.ByName("table")
 
 	if _, ok := a.Tables[tableName]; !ok {
@@ -203,9 +200,20 @@ func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 		NotFoundWithParams(w, r, err.Error())
 		return
 	}
-	log.Printf("Put Query: %s, args: %v", q, args)
+
+	res, err := a.DB.Exec(q, args...)
+	if err != nil {
+		NotFoundWithParams(w, r, err.Error()+" :: "+q)
+		return
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		log.Printf("error ", err)
+	}
+	log.Printf("200 - %s %s", r.Method, r.RequestURI)
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(fmt.Sprintf("PUT request for table %s ", table)))
+	w.Write([]byte(fmt.Sprintf("{\"message\":\"success\", \"rows_affected\":%d}", rowsAffected)))
 }
 
 // stub
@@ -326,37 +334,46 @@ func GenMeta(table *Table, location string) Meta {
 	return schema
 }
 
+// UpdateQueryComposer creates a mysql update query
 func UpdateQueryComposer(table, pKey string, r *http.Request) (string, []interface{}, error) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Println(string(body))
 
+	// the body should be key value pairs, populate them into `v`
 	v := make(map[string]interface{})
 	err = json.Unmarshal(body, &v)
 	if err != nil {
 		log.Print("error decoding json body to map ", err)
 	}
+
+	// set up the query
 	q := fmt.Sprintf("update %v set ", table)
 	set := ""
 	where := ""
+	var whereArg interface{}
+	args := make([]interface{}, 0)
 
 	for k, v := range v {
 		// it would be nice to have table.Cols as map rather than slice
 		if k == pKey {
-			where = fmt.Sprintf("where '%v'='%v' limit 1", pKey, v)
+			where = fmt.Sprintf(" where %v=? limit 1", pKey)
+			whereArg = v
 			continue
 		}
-		set += fmt.Sprintf("'%v'='%v',", k, v) // better: strings.Join()
+		set += fmt.Sprintf("%v=?,", k) // better: strings.Join()
+		args = append(args, v)
 	}
 
+	// if where was not populated, then we were not given the primary key in the query.
 	if len(where) == 0 {
 		return "", nil, errors.New("Missing primary key in query on " + table)
 	}
-
+	args = append(args, whereArg)
 	set = set[:len(set)-1] // remove trailing comma
-	return q + set + where, nil, nil
+
+	return q + set + where, args, nil
 }
 
 // refactor to take interface with methods *.URL.RawQuery
