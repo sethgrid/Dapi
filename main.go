@@ -218,18 +218,33 @@ func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 
 // stub
 func (a *Apid) DeleteTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	log.Print("DeleteTable")
+	tableName := t.ByName("table")
 
-	table := t.ByName("table")
-	w.Write([]byte(fmt.Sprintf("DELETE request for table %s ", table)))
-
-	if _, ok := a.Tables[table]; ok {
-		log.Println("Table found! ")
-	} else {
-		log.Println("No table found ")
-		NotFoundWithParams(w, r, "")
+	if _, ok := a.Tables[tableName]; !ok {
+		NotFoundWithParams(w, r, fmt.Sprintf("table (%s) not found", tableName))
 		return
 	}
+	table := a.Tables[tableName]
+
+	q, args, err := DeleteQueryComposer(table.Name, r)
+	if err != nil {
+		NotFoundWithParams(w, r, err.Error())
+		return
+	}
+
+	res, err := a.DB.Exec(q, args...)
+	if err != nil {
+		NotFoundWithParams(w, r, err.Error()+" :: "+q)
+		return
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		log.Printf("error ", err)
+	}
+	log.Printf("200 - %s %s", r.Method, r.RequestURI)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(fmt.Sprintf("{\"message\":\"success\", \"rows_affected\":%d}", rowsAffected)))
 }
 
 /*******************
@@ -247,6 +262,7 @@ type Meta struct {
 	Location    string              `json:"location"`
 	Methods     []string            `json:"methods"`
 	Title       string              `json:"title"`
+	Notes       string              `json:"notes"`
 }
 
 // properties are each column on a table
@@ -297,6 +313,7 @@ func GenMeta(table *Table, location string) Meta {
 	required := make([]string, 0)
 	primary := ""
 	schemaType := "object"
+	notes := "TODO: have each method have its own entry because PUT requires the primary key and Delete requires a limit."
 	// assume all methods for now. latter, we can have a table restrictions
 	methods := []string{"GET", "POST", "PUT", "DELETE"}
 
@@ -330,8 +347,50 @@ func GenMeta(table *Table, location string) Meta {
 	schema.Required = required
 	schema.SchemaType = schemaType
 	schema.Methods = methods
+	schema.Notes = notes
 
 	return schema
+}
+
+// DeleteQueryComposer creates a mysql update query
+func DeleteQueryComposer(table string, r *http.Request) (string, []interface{}, error) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// the body should be key value pairs, populate them into `v`
+	v := make(map[string]interface{})
+	err = json.Unmarshal(body, &v)
+	if err != nil {
+		log.Print("error decoding json body to map ", err)
+	}
+
+	// set up the query
+	q := fmt.Sprintf("delete from %v where ", table)
+	where := ""
+	limit := ""
+	var limitArg interface{}
+	args := make([]interface{}, 0)
+
+	for k, v := range v {
+		if k == "limit" {
+			limit = " limit ?"
+			limitArg = v
+			continue
+		}
+		where += fmt.Sprintf("%v=? and", k) // better: strings.Join()
+		args = append(args, v)
+	}
+
+	// if where was not populated, then we were not given the primary key in the query.
+	if len(limit) == 0 {
+		return "", nil, errors.New("Missing limit key in delete query on " + table)
+	}
+	args = append(args, limitArg)
+	where = where[:len(where)-3] // remove trailing and
+
+	return q + where + limit, args, nil
 }
 
 // UpdateQueryComposer creates a mysql update query
