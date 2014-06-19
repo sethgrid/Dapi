@@ -82,3 +82,44 @@ Date: Sat, 14 Jun 2014 19:39:32 GMT
     }
 ]
 ```
+
+#### Modifying Data
+
+Dapi provides POST, PUT, and DELETE calls to respectively insert, update, and delete records.
+
+```
+$ http POST :9000/api/v1/crud/user email="new@example.com" name="New Guy"
+HTTP/1.1 200 OK
+Content-Length: 39
+Content-Type: application/json
+Date: Thu, 19 Jun 2014 04:26:01 GMT
+
+{
+    "inserted_id": 24,
+    "message": "success"
+}
+
+
+$ http PUT :9000/api/v1/crud/user email="updated@example.com" id=24
+HTTP/1.1 200 OK
+Content-Length: 40
+Content-Type: application/json
+Date: Thu, 19 Jun 2014 04:26:34 GMT
+
+{
+    "message": "success",
+    "rows_affected": 1
+}
+
+
+$ http DELETE :9000/api/v1/crud/user name="New Guy" limit=1
+HTTP/1.1 200 OK
+Content-Length: 40
+Content-Type: application/json
+Date: Thu, 19 Jun 2014 04:27:01 GMT
+
+{
+    "message": "success",
+    "rows_affected": 1
+}
+```
