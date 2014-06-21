@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -12,8 +13,42 @@ import (
  *   DB stuff; connecting, getting tables   *
  ********************************************/
 
-func OpenDB() *sql.DB {
-	db, err := sql.Open("mysql", "/test_db")
+// Constructs the dataSourceName string
+type DataSourceName struct {
+	User, Password, Host, Port, DBName, Raw string
+}
+
+// Method to get the constructed string
+func (d *DataSourceName) String() string {
+	// username:password@protocol(address)/dbname?param=value
+	if len(d.Raw) > 0 {
+		// mutate the DataSourceObject for logging elsewhere
+		// we could populate the whole object, but yagni
+		s := strings.Split(d.Raw, "/")
+		d.DBName = s[len(s)-1]
+
+		return d.Raw
+	}
+
+	var hostAndPort string
+	if len(d.Port) > 0 {
+		hostAndPort = fmt.Sprintf("@tcp(%s:%s)", d.Host, d.Port)
+	} else {
+		hostAndPort = d.Host
+	}
+
+	var pw string
+	if len(d.Password) > 0 {
+		pw = ":" + d.Password
+	}
+
+	return fmt.Sprintf("%s%s%s/%s", d.User, pw, hostAndPort, d.DBName)
+}
+
+// Simple wrapper to handle error
+func OpenDB(d *DataSourceName) *sql.DB {
+	db, err := sql.Open("mysql", d.String())
+
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -26,18 +61,20 @@ type Table struct {
 }
 
 type TableSchema struct {
-	TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, COLUMN_DEFAULT, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, DATETIME_PRECISION, CHARACTER_SET_NAME, COLLATION_NAME, COLUMN_TYPE, COLUMN_KEY, EXTRA, PRIVILEGES, COLUMN_COMMENT sql.NullString
+	TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, COLUMN_DEFAULT, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, CHARACTER_SET_NAME, COLLATION_NAME, COLUMN_TYPE, COLUMN_KEY, EXTRA, PRIVILEGES, COLUMN_COMMENT sql.NullString
 }
 
+// populates map of table information
 func GetTables(db *sql.DB) map[string]*Table {
 	allTables := make(map[string]*Table)
 
 	// could also get TABLE_SCHEMA if it is important for future use
-	r, err := db.Query("select TABLE_NAME from information_schema.tables where table_type=\"BASE TABLE\"")
+	r, err := db.Query("select table_name from information_schema.tables where table_type=\"BASE TABLE\"")
 	if err != nil {
 		log.Fatal("unable to reach information schema ", err)
 	}
 
+	// get all the tables, one at a time
 	tables := make([]string, 0)
 	for r.Next() {
 		var name string
@@ -48,12 +85,15 @@ func GetTables(db *sql.DB) map[string]*Table {
 		tables = append(tables, name)
 	}
 
+	// query each table's structure
 	for _, t := range tables {
 		nextTable := &Table{Name: t}
 		allTables[t] = nextTable
 		r, err := db.Query(
 			fmt.Sprintf(
-				"select * from information_schema.columns where "+
+				"select "+
+					"TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, COLUMN_DEFAULT, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, CHARACTER_SET_NAME, COLLATION_NAME, COLUMN_TYPE, COLUMN_KEY, EXTRA, PRIVILEGES, COLUMN_COMMENT "+
+					"from information_schema.columns where "+
 					"table_name=\"%s\"", t))
 
 		if err != nil {
@@ -73,7 +113,6 @@ func GetTables(db *sql.DB) map[string]*Table {
 			var CHARACTER_OCTET_LENGTH sql.NullString
 			var NUMERIC_PRECISION sql.NullString
 			var NUMERIC_SCALE sql.NullString
-			var DATETIME_PRECISION sql.NullString
 			var CHARACTER_SET_NAME sql.NullString
 			var COLLATION_NAME sql.NullString
 			var COLUMN_TYPE sql.NullString
@@ -95,7 +134,6 @@ func GetTables(db *sql.DB) map[string]*Table {
 				&CHARACTER_OCTET_LENGTH,
 				&NUMERIC_PRECISION,
 				&NUMERIC_SCALE,
-				&DATETIME_PRECISION,
 				&CHARACTER_SET_NAME,
 				&COLLATION_NAME,
 				&COLUMN_TYPE,
@@ -104,11 +142,12 @@ func GetTables(db *sql.DB) map[string]*Table {
 				&PRIVILEGES,
 				&COLUMN_COMMENT)
 			if err != nil {
-				log.Print("error scanning column schema ", err)
+				log.Fatal("error scanning column schema ", err)
 			}
-			info := &TableSchema{TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, COLUMN_DEFAULT, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, DATETIME_PRECISION, CHARACTER_SET_NAME, COLLATION_NAME, COLUMN_TYPE, COLUMN_KEY, EXTRA, PRIVILEGES, COLUMN_COMMENT}
+			info := &TableSchema{TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, COLUMN_DEFAULT, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, CHARACTER_SET_NAME, COLLATION_NAME, COLUMN_TYPE, COLUMN_KEY, EXTRA, PRIVILEGES, COLUMN_COMMENT}
 			allTables[t].Cols = append(allTables[t].Cols, info)
 		}
 	}
+
 	return allTables
 }

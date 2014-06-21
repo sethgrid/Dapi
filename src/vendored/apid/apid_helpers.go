@@ -86,7 +86,6 @@ func GenMeta(table *Table, location string) Meta {
 		p.Description = c.COLUMN_COMMENT.String
 
 		if c.COLUMN_KEY.String == "PRI" {
-			log.Print("setting primary key")
 			primary = c.COLUMN_NAME.String
 		}
 

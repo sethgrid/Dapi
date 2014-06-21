@@ -1,17 +1,32 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net/http"
 
 	"vendored/apid"
 )
 
-func main() {
-	log.Println("started")
+var dbName, host, port, password, user, raw string
 
-	// currently, we only work on mysql dbs with no user, no password
-	DB := apid.OpenDB()
+func init() {
+	flag.StringVar(&dbName, "db_name", "test_db", "Mysql Database Name")
+	flag.StringVar(&host, "db_host", "", "Mysql Database Host")
+	flag.StringVar(&port, "db_port", "", "Mysql Database Port, usually 3306")
+	flag.StringVar(&password, "db_pw", "", "Mysql Database Password")
+	flag.StringVar(&user, "db_user", "", "Mysql Database Username")
+	flag.StringVar(&raw, "db_datasource", "", "Mysql Database Resource, overrides other settings: username:password@protocol(address)/dbname")
+}
+
+func main() {
+	flag.Parse()
+	log.Println("Attempting to connect to DB...")
+
+	conn := &apid.DataSourceName{DBName: dbName, Host: host, Port: port, Password: password, User: user, Raw: raw}
+	DB := apid.OpenDB(conn)
+
+	log.Print("Connected to " + conn.DBName)
 
 	// grab all the table data. We can now easily remove any tables if we want
 	// we will prolly want to use this differently. This should prolly be done
