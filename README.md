@@ -123,3 +123,7 @@ Date: Thu, 19 Jun 2014 04:27:01 GMT
     "rows_affected": 1
 }
 ```
+
+### Testing
+
+Tests have been started for the apid vendored code. ``` $ cd src/vendored/apid && go test```. The current test is an integration test and requires that you have a local mysql instance with root login sans password with a database "apid_integration_test". I plan on updating this to use a testing tag of 'integration' and to allow for a configurable db connection.

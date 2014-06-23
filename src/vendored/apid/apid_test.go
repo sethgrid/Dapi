@@ -57,6 +57,7 @@ func TestServer(t *testing.T) {
 
 		router.ServeHTTP(rw, req)
 
+		// got, want
 		if g, w := rw.Code, test.code; g != w {
 			t.Errorf("Actual status (%d) not equal expected status (%d)", g, w)
 		}
