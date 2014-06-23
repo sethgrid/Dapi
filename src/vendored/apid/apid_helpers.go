@@ -43,6 +43,7 @@ func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httpro
 
 	log.Printf("200 - %s %s", r.Method, r.RequestURI)
 	w.Header().Set("Content-Type", "application/json")
+
 	location := r.RequestURI[:len(r.RequestURI)-len("_meta")]
 	j, err := json.Marshal(GenMeta(a.Tables[tableName], location))
 	if err != nil {
