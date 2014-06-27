@@ -75,6 +75,8 @@ func TestServer(t *testing.T) {
 		{"POST", "/api/v1/crud/user", ReqBody{`{"name":"jack","email":"jack@example.com"}`}, "inserted_id", 200},
 		{"GET", "/api/v1/crud/user", ReqBody{}, "jack", 200},
 		{"GET", "/api/v1/crud/user?name=jack", ReqBody{}, "jack@example.com", 200},
+		{"POST", "/api/v1/crud/user", ReqBody{`{"id":26,"name":"jack","email":"jack-n-jill@example.com"}`}, "Duplicate", 404},
+		{"PUT", "/api/v1/crud/user", ReqBody{`{"id":26,"name":"jack","email":"jack-n-jill@example.com"}`}, "success", 200},
 		{"DELETE", "/api/v1/crud/user", ReqBody{`{"id":26,"limit":1}`}, "rows_affected\":1", 200}, // not sure why id 26 is first yet
 	}
 
