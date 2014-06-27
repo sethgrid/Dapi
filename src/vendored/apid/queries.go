@@ -20,6 +20,7 @@ import (
 // InsertQueryComposer creates a mysql update query
 func InsertQueryComposer(table string, r *http.Request) (string, []interface{}, error) {
 	body, err := ioutil.ReadAll(r.Body)
+
 	if err != nil {
 		log.Fatal(err)
 	}

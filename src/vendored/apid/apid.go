@@ -146,7 +146,6 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 // PostTable inserts a record
 func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
 	tableName := t.ByName("table")
-
 	if _, ok := a.Tables[tableName]; !ok {
 		NotFoundWithParams(w, r, fmt.Sprintf("table (%s) not found", tableName))
 		return

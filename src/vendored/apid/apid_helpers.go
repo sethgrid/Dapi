@@ -85,7 +85,7 @@ func GenMeta(table *Table, location, method string) Meta {
 	required := make([]string, 0)
 	primary := ""
 	schemaType := "object"
-	notes := "TODO: have each method have its own entry because PUT requires the primary key and Delete requires a limit, and POST does not want the primary key."
+	notes := ""
 
 	// get column info for properties
 	for _, c := range table.Cols {

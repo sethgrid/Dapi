@@ -6,12 +6,40 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+// open question: why do I need to define a closer on the tests stuct to access the body? Seems like httpTest should provide this.
+type Test struct {
+	method          string
+	url             string
+	reqBody         ReqBody
+	resBodyContains string
+	code            int
+}
+
+type ReqBody struct {
+	contents string
+}
+
+func (r ReqBody) Close() error {
+	return nil
+}
+
+func (r ReqBody) Read(p []byte) (n int, err error) {
+	// how is this supposed to work? p needs to be a pointer...
+	b := make([]byte, 0)
+	b = []byte(r.contents)
+
+	copy(p, b)
+	p = bytes.Trim(p, "\x00")
+	return len(p), io.EOF
+}
 
 // sets up a test db and tests endpoints
 func TestServer(t *testing.T) {
@@ -39,19 +67,22 @@ func TestServer(t *testing.T) {
 	router := apid.NewRouter()
 
 	// test cases
-	var tests = []struct {
-		method, url, reqBody, resBodyContains string
-		code                                  int
-	}{
-		{"GET", "/api/v1/crud/user/_meta", "", "MySQL Table user", 200},
-		{"GET", "/api/v1/crud/settings/_meta", "", "MySQL Table settings", 200},
-		{"GET", "/api/v1/crud/unknown_table/_meta", "", "No table", 404},
+	var tests = []Test{
+		{"GET", "/api/v1/crud/user/_meta", ReqBody{}, "MySQL Table user", 200},
+		{"GET", "/api/v1/crud/settings/_meta", ReqBody{}, "MySQL Table settings", 200},
+		{"GET", "/api/v1/crud/unknown_table/_meta", ReqBody{}, "No table", 404},
+		{"POST", "/api/v1/crud/user/", ReqBody{}, "", 307}, // trailing slash redirects
+		{"POST", "/api/v1/crud/user", ReqBody{`{"name":"jack","email":"jack@example.com"}`}, "inserted_id", 200},
+		{"GET", "/api/v1/crud/user", ReqBody{}, "jack", 200},
+		{"GET", "/api/v1/crud/user?name=jack", ReqBody{}, "jack@example.com", 200},
+		{"DELETE", "/api/v1/crud/user", ReqBody{`{"id":26,"limit":1}`}, "rows_affected\":1", 200}, // not sure why id 26 is first yet
 	}
 
 	// test runner
 	for _, test := range tests {
 		req, _ := http.NewRequest(test.method, test.url, nil)
 		req.RequestURI = test.url // http.NewRequest does not set the RequestURI
+		req.Body = test.reqBody   // http.NewRequest does not set the  Body
 		rw := httptest.NewRecorder()
 		rw.Body = new(bytes.Buffer)
 
@@ -59,10 +90,10 @@ func TestServer(t *testing.T) {
 
 		// got, want
 		if g, w := rw.Code, test.code; g != w {
-			t.Errorf("Actual status (%d) not equal expected status (%d)", g, w)
+			t.Errorf("%s %s - Actual status (%d) not equal expected status (%d)", test.method, test.url, g, w)
 		}
 		if g, w := rw.Body.String(), test.resBodyContains; !strings.Contains(g, w) {
-			t.Errorf("Response Body Error, actual does not contain expected (\"%s\")\n\n%s\n\n", w, g)
+			t.Errorf("%s %s - Response Body Error, actual does not contain expected (\"%s\")\n\n%s\n\n", test.method, test.url, w, g)
 		}
 	}
 }
