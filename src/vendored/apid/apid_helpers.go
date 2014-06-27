@@ -22,7 +22,7 @@ type Meta struct {
 	Required    []string            `json:"required"`
 	Primary     string              `json:"primary"`
 	Location    string              `json:"location"`
-	Methods     []string            `json:"methods"`
+	Method      string              `json:"method"`
 	Title       string              `json:"title"`
 	Notes       string              `json:"notes"`
 }
@@ -45,7 +45,12 @@ func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httpro
 	w.Header().Set("Content-Type", "application/json")
 
 	location := r.RequestURI[:len(r.RequestURI)-len("_meta")]
-	j, err := json.Marshal(GenMeta(a.Tables[tableName], location))
+	methods := []string{"GET", "POST", "PUT", "DELETE"}
+	schema := make([]Meta, 0)
+	for _, method := range methods {
+		schema = append(schema, GenMeta(a.Tables[tableName], location, method))
+	}
+	j, err := json.Marshal(schema)
 	if err != nil {
 		log.Printf("error making json schema ", err)
 	}
@@ -56,9 +61,13 @@ func (a *Apid) TableMetaHandler(w http.ResponseWriter, r *http.Request, t httpro
 func (a *Apid) MetaHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 	log.Print("metaHandler")
 	wholeSchema := make([]Meta, 0)
+	methods := []string{"GET", "POST", "PUT", "DELETE"}
+
 	for _, t := range a.Tables {
-		location := r.RequestURI[:len(r.RequestURI)-len("_meta")] + t.Name
-		wholeSchema = append(wholeSchema, GenMeta(t, location))
+		for _, method := range methods {
+			location := r.RequestURI[:len(r.RequestURI)-len("_meta")] + t.Name
+			wholeSchema = append(wholeSchema, GenMeta(t, location, method))
+		}
 	}
 	log.Printf("200 - %s %s", r.Method, r.RequestURI)
 	w.Header().Set("Content-Type", "application/json")
@@ -70,15 +79,13 @@ func (a *Apid) MetaHandler(w http.ResponseWriter, r *http.Request, _ httprouter.
 }
 
 // common functionality for generating meta data
-func GenMeta(table *Table, location string) Meta {
+func GenMeta(table *Table, location, method string) Meta {
 	// this could all be initialized at startup, as oppposed to each call
 	properties := make(map[string]Property)
 	required := make([]string, 0)
 	primary := ""
 	schemaType := "object"
 	notes := "TODO: have each method have its own entry because PUT requires the primary key and Delete requires a limit, and POST does not want the primary key."
-	// assume all methods for now. latter, we can have a table restrictions
-	methods := []string{"GET", "POST", "PUT", "DELETE"}
 
 	// get column info for properties
 	for _, c := range table.Cols {
@@ -91,13 +98,25 @@ func GenMeta(table *Table, location string) Meta {
 		}
 
 		if c.IS_NULLABLE.String == "NO" {
-			required = append(required, c.COLUMN_NAME.String)
+			// TODO: refactor to get this POST logic down into the switch
+			if !((method == "POST" || method == "GET") && c.COLUMN_KEY.String == "PRI") {
+				required = append(required, c.COLUMN_NAME.String)
+			}
 		}
 
 		properties[c.COLUMN_NAME.String] = p
 	}
-	properties["limit"] = Property{DataType: "int", Description: "Used to limit the number of results returned"}
-	properties["offset"] = Property{DataType: "int", Description: "Used to offset results returned"}
+
+	switch method {
+	case "GET":
+		properties["limit"] = Property{DataType: "int", Description: "Used to limit the number of results returned"}
+		properties["offset"] = Property{DataType: "int", Description: "Used to offset results returned"}
+	case "POST":
+	case "PUT":
+	case "DELETE":
+		properties["limit"] = Property{DataType: "int", Description: "Used to limit the number of records deleted"}
+		required = append(required, "limit")
+	}
 
 	// init schema struct
 	schema := Meta{}
@@ -108,7 +127,7 @@ func GenMeta(table *Table, location string) Meta {
 	schema.Primary = primary
 	schema.Required = required
 	schema.SchemaType = schemaType
-	schema.Methods = methods
+	schema.Method = method
 	schema.Notes = notes
 
 	return schema
