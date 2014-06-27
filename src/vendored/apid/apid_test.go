@@ -80,9 +80,9 @@ func TestServer(t *testing.T) {
 
 	// test runner
 	for _, test := range tests {
-		req, _ := http.NewRequest(test.method, test.url, nil)
+		req, _ := http.NewRequest(test.method, test.url, test.reqBody)
 		req.RequestURI = test.url // http.NewRequest does not set the RequestURI
-		req.Body = test.reqBody   // http.NewRequest does not set the  Body
+
 		rw := httptest.NewRecorder()
 		rw.Body = new(bytes.Buffer)
 
