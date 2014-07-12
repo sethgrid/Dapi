@@ -76,9 +76,7 @@
 //  thirdValue := ps[2].Value // the value of the 3rd parameter
 package httprouter
 
-import (
-	"net/http"
-)
+import "net/http"
 
 // Handle is a function that can be registered to a route to handle HTTP
 // requests. Like http.HandlerFunc, but has a third parameter for the values of

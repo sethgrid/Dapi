@@ -15,14 +15,25 @@ import (
  *   APID Struct and Handlers   *
  ********************************/
 
+type DBContext interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+}
+
 // the apid struct allows us to use the db at different endpoints
 type Apid struct {
-	DB     *sql.DB
-	Tables map[string]*Table
+	DB      *sql.DB
+	Context DBContext
+	Tables  map[string]*Table
+	Router  *httprouter.Router
+}
+
+func (a *Apid) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	a.Router.ServeHTTP(rw, r)
 }
 
 // returns all routing
-func (a *Apid) NewRouter() http.Handler {
+func (a *Apid) NewRouter() *httprouter.Router {
 	// routing
 	router := httprouter.New()
 	router.GET("/", RootHandler)
@@ -34,10 +45,7 @@ func (a *Apid) NewRouter() http.Handler {
 	router.PUT("/api/v1/crud/:table", a.PutTable)
 	router.DELETE("/api/v1/crud/:table", a.DeleteTable)
 
-	router.GET("/api/v1/transaction", GetTransaction)
-	router.POST("/api/v1/transaction", PostTransaction)
-	router.PUT("/api/v1/transaction", PutTransaction)
-	router.DELETE("/api/v1/transaction", DeleteTransaction)
+	router.POST("/api/v1/transaction", a.PostTransaction)
 
 	// use our own NotFound Handler
 	router.NotFound = NotFound
@@ -89,7 +97,7 @@ func (a *Apid) GetTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 	table := a.Tables[tableName]
 	query, args := a.SelectQueryComposer(table.Name, r)
 
-	rows, err := a.DB.Query(query, args...)
+	rows, err := a.Context.Query(query, args...)
 
 	if err != nil {
 		log.Printf("Error querying GET on %s", table.Name)
@@ -159,7 +167,7 @@ func (a *Apid) PostTable(w http.ResponseWriter, r *http.Request, t httprouter.Pa
 		return
 	}
 
-	res, err := a.DB.Exec(q, args...)
+	res, err := a.Context.Exec(q, args...)
 	if err != nil {
 		NotFoundWithParams(w, r, err.Error()+" :: "+q)
 		return
@@ -201,7 +209,7 @@ func (a *Apid) PutTable(w http.ResponseWriter, r *http.Request, t httprouter.Par
 		return
 	}
 
-	res, err := a.DB.Exec(q, args...)
+	res, err := a.Context.Exec(q, args...)
 	if err != nil {
 		NotFoundWithParams(w, r, err.Error()+" :: "+q)
 		return
@@ -232,7 +240,7 @@ func (a *Apid) DeleteTable(w http.ResponseWriter, r *http.Request, t httprouter.
 		return
 	}
 
-	res, err := a.DB.Exec(q, args...)
+	res, err := a.Context.Exec(q, args...)
 	if err != nil {
 		NotFoundWithParams(w, r, err.Error()+" :: "+q)
 		return

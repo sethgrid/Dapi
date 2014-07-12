@@ -1,6 +1,10 @@
 package apid
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
@@ -28,15 +32,120 @@ a transaction. If the whole transaction is good, return success. The client coul
 putting it all together. Simple.
 */
 
-func GetTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	w.Write([]byte("unimplemented"))
+type subResponseWriter struct {
+	rw   http.ResponseWriter
+	buf  *bytes.Buffer
+	code int
 }
-func PostTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	w.Write([]byte("unimplemented"))
+
+func (s *subResponseWriter) Header() http.Header {
+	return s.rw.Header()
 }
-func PutTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	w.Write([]byte("unimplemented"))
+
+func (s *subResponseWriter) Write(b []byte) (int, error) {
+	return s.buf.Write(b)
 }
-func DeleteTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
-	w.Write([]byte("unimplemented"))
+
+func (s *subResponseWriter) WriteHeader(code int) {
+	s.code = code
+}
+
+func (s *subResponseWriter) Success() bool {
+	return s.code < 300
+}
+
+type Transaction struct {
+	Requests []*Request `json:"requests"`
+}
+
+type Request struct {
+	Method string `json:"method"`
+	URL    string `json:"url"`
+	Body   string `json:"body"`
+}
+
+func (a *Apid) PostTransaction(w http.ResponseWriter, r *http.Request, t httprouter.Params) {
+	defer r.Body.Close()
+
+	decoder := json.NewDecoder(r.Body)
+
+	transaction := &Transaction{}
+	err := decoder.Decode(&transaction)
+	if err != nil {
+		log.Fatal("unable to decode json", err)
+	}
+
+	log.Println("starting tx...")
+	tx, err := a.DB.Begin()
+
+	if err != nil {
+		log.Fatal("unable to create transaction", err)
+	}
+
+	apid := &Apid{
+		DB:      a.DB,
+		Context: tx,
+		Tables:  a.Tables,
+	}
+	apid.Router = apid.NewRouter()
+
+	w.Write([]byte("["))
+	defer w.Write([]byte("]"))
+
+	for i, req := range transaction.Requests {
+		if i != 0 {
+			// comma separate the items of the json array response
+			// but not the first item, duh
+			w.Write([]byte(","))
+		}
+
+		log.Printf("\t%s %s\n", req.Method, req.URL)
+		handler, params, _ := apid.Router.Lookup(req.Method, req.URL)
+		if handler == nil {
+			// want to return 404 or something and rollback
+			log.Fatal("unknown path")
+		}
+
+		body := &bytes.Buffer{}
+		body.WriteString(req.Body)
+
+		srw := &subResponseWriter{
+			rw:  w,
+			buf: &bytes.Buffer{},
+		}
+
+		subReq, err := http.NewRequest(req.Method, req.URL, body)
+		if err != nil {
+			log.Fatal("unable to create request", err)
+		}
+
+		handler(srw, subReq, params)
+
+		if !srw.Success() {
+			log.Printf("\terror: %d\n", srw.code)
+			log.Println("rolling back")
+
+			err := tx.Rollback()
+			if err != nil {
+				log.Fatal("unable to rollback")
+			}
+
+			// todo: make this prettier, also json escape the buf value
+			fmt.Fprintf(w, `{"message":"%s"}`, srw.buf.String())
+
+			w.WriteHeader(500)
+
+			return
+		}
+
+		fmt.Fprintf(w, srw.buf.String())
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		tx.Rollback()
+		log.Fatal("unable to commit", err)
+	}
+
+	log.Println("tx commited")
 }
