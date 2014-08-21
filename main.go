@@ -5,7 +5,8 @@ import (
 	"log"
 	"net/http"
 
-	"vendored/apid"
+	"github.com/sethgrid/dapi/db/mysql"
+	"github.com/sethgrid/dapi/rest"
 )
 
 var dbName, host, port, password, user, raw string
@@ -23,18 +24,14 @@ func main() {
 	flag.Parse()
 	log.Println("Attempting to connect to DB...")
 
-	conn := &apid.DataSourceName{DBName: dbName, Host: host, Port: port, Password: password, User: user, Raw: raw}
-	DB := apid.OpenDB(conn)
-
-	log.Print("Connected to " + conn.DBName)
-
-	// grab all the table data. We can now easily remove any tables if we want
-	// we will prolly want to use this differently. This should prolly be done
-	// behind the scenes by having a NewApid() method
-	tables := apid.GetTables(DB)
+	mysql := &mysql.DataSource{DBName: dbName, Host: host, Port: port, Password: password, User: user, Raw: raw}
+	database, err := mysql.DB()
+	if err != nil {
+		log.Fatalf("unable to connect to database", err)
+	}
 
 	// container object to expose the db and the tables at endpoints
-	myApid := &apid.Apid{DB: DB, Tables: tables, Context: DB}
+	myApid := &rest.Apid{DataSource: mysql, Context: database}
 
 	// routing. how would we add custom endpoints from here?
 	router := myApid.NewRouter()

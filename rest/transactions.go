@@ -1,4 +1,4 @@
-package apid
+package rest
 
 import (
 	"bytes"
@@ -76,16 +76,22 @@ func (a *Apid) PostTransaction(w http.ResponseWriter, r *http.Request, t httprou
 	}
 
 	log.Println("starting tx...")
-	tx, err := a.DB.Begin()
+	database, err := a.DataSource.DB()
+	if err != nil {
+		Error(w, r, "unable to connect to db", err)
+		return
+	}
+
+	tx, err := database.Begin()
 
 	if err != nil {
-		log.Fatal("unable to create transaction", err)
+		Error(w, r, "unable to create transaction", err)
+		return
 	}
 
 	apid := &Apid{
-		DB:      a.DB,
-		Context: tx,
-		Tables:  a.Tables,
+		DataSource: a.DataSource,
+		Context:    tx,
 	}
 	apid.Router = apid.NewRouter()
 
@@ -103,7 +109,9 @@ func (a *Apid) PostTransaction(w http.ResponseWriter, r *http.Request, t httprou
 		handler, params, _ := apid.Router.Lookup(req.Method, req.URL)
 		if handler == nil {
 			// want to return 404 or something and rollback
-			log.Fatal("unknown path")
+			tx.Rollback()
+			Error(w, r, "unknown path", err)
+			return
 		}
 
 		body := &bytes.Buffer{}
@@ -116,7 +124,8 @@ func (a *Apid) PostTransaction(w http.ResponseWriter, r *http.Request, t httprou
 
 		subReq, err := http.NewRequest(req.Method, req.URL, body)
 		if err != nil {
-			log.Fatal("unable to create request", err)
+			Error(w, r, "unable to create request", err)
+			return
 		}
 
 		handler(srw, subReq, params)
@@ -127,7 +136,8 @@ func (a *Apid) PostTransaction(w http.ResponseWriter, r *http.Request, t httprou
 
 			err := tx.Rollback()
 			if err != nil {
-				log.Fatal("unable to rollback")
+				Error(w, r, "unable to rollback", err)
+				return
 			}
 
 			// todo: make this prettier, also json escape the buf value
@@ -144,7 +154,8 @@ func (a *Apid) PostTransaction(w http.ResponseWriter, r *http.Request, t httprou
 	err = tx.Commit()
 	if err != nil {
 		tx.Rollback()
-		log.Fatal("unable to commit", err)
+		Error(w, r, "unable to commit", err)
+		return
 	}
 
 	log.Println("tx commited")
