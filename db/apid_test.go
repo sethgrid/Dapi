@@ -1,4 +1,4 @@
-package apid
+package db
 
 // TODO: add test tag for integration (no need to spin up a db for each test)
 

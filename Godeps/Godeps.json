@@ -1,0 +1,15 @@
+{
+	"ImportPath": "github.com/sethgrid/dapi",
+	"GoVersion": "go1.3",
+	"Deps": [
+		{
+			"ImportPath": "github.com/go-sql-driver/mysql",
+			"Comment": "v1.2-8-g0b00042",
+			"Rev": "0b000424e546f305e0bd47856d5fcb904c1a0eb4"
+		},
+		{
+			"ImportPath": "github.com/julienschmidt/httprouter",
+			"Rev": "afa7ae29ca847252b56d9279b6a012c1a7a5e225"
+		}
+	]
+}

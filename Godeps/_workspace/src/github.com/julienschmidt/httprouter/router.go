@@ -93,7 +93,7 @@ type Param struct {
 
 // Params is a Param-slice, as returned by the router.
 // The slice is ordered, the first URL parameter is also the first slice value.
-// It is therefore save to read values by the index.
+// It is therefore safe to read values by the index.
 type Params []Param
 
 // ByName returns the value of the first Param which key matches the given name.
@@ -275,7 +275,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if handle, ps, tsr := root.getValue(path); handle != nil {
 			handle(w, req, ps)
 			return
-		} else if req.Method != "CONNECT" {
+		} else if req.Method != "CONNECT" && path != "/" {
 			code := 301 // Permanent redirect, request with GET method
 			if req.Method != "GET" {
 				// Temporary redirect, request with same method
@@ -283,7 +283,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				code = 307
 			}
 
-			if tsr && r.RedirectTrailingSlash && path != "/" {
+			if tsr && r.RedirectTrailingSlash {
 				if path[len(path)-1] == '/' {
 					req.URL.Path = path[:len(path)-1]
 				} else {
